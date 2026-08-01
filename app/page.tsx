@@ -1,65 +1,413 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { usePreflight } from "@/lib/usePreflight";
+import { BlockerCard, GraphView, StatusPill } from "@/components/ui";
+import { MedplumProof, Readback } from "@/components/proof";
+import type { NodeId, PatientConstraints } from "@/lib/types";
+
+type Phase =
+  | "plan"
+  | "compiling"
+  | "conversation"
+  | "results"
+  | "readback"
+  | "proof";
+
+/**
+ * Scripted conversation turns. Swap for live Deepgram STT later — the
+ * constraint payloads each turn produces are exactly what extraction emits.
+ */
+const TURNS: {
+  agent: string;
+  patient?: string;
+  sets?: Partial<PatientConstraints>;
+  retrieval?: { doc: string; excerpt: string; ms: number };
+}[] = [
+  {
+    agent:
+      "Before your treatment begins I need to confirm a few practical details. How often do you think you'll take this medication?",
+    patient: "Every day, with breakfast.",
+    sets: { believedDosingFrequency: "daily" },
+    retrieval: {
+      doc: "Methotrexate Initiation Protocol",
+      excerpt:
+        "Methotrexate for plaque psoriasis is dosed ONCE WEEKLY. Daily administration is a known fatal medication error.",
+      ms: 6,
+    },
+  },
+  {
+    agent:
+      "The plan your clinician recorded says once weekly, not daily. I'll flag this for the clinical team to confirm with you before treatment begins.",
+  },
+  {
+    agent:
+      "Would you be able to complete laboratory testing on a weekday between eight and five?",
+    patient: "No — I work eight to six.",
+    sets: { weekdayLabAvailable: false },
+    retrieval: {
+      doc: "Northside Laboratory Hours",
+      excerpt:
+        "Saturday appointments available 8:00 AM to 12:00 PM for patients unable to attend weekday hours.",
+      ms: 7,
+    },
+  },
+];
+
+const COMPILE_STEPS = [
+  "Reading Medplum CarePlan",
+  "Building dependency graph",
+  "Checking payer eligibility (Stedi 270/271)",
+  "Retrieving clinical rules (Moss)",
+  "Checking scheduling availability",
+  "Preparing patient questions",
+];
 
 export default function Home() {
+  const [phase, setPhase] = useState<Phase>("plan");
+  const [turn, setTurn] = useState(0);
+  const [step, setStep] = useState(0);
+  const [local, setLocal] = useState<PatientConstraints>({});
+  const pf = usePreflight();
+
+  async function startPreflight() {
+    setPhase("compiling");
+    setStep(0);
+    for (let i = 0; i < COMPILE_STEPS.length; i++) {
+      setStep(i + 1);
+      await new Promise((r) => setTimeout(r, 240));
+    }
+    await pf.run({});
+    setTurn(0);
+    setPhase("conversation");
+  }
+
+  async function advance() {
+    const t = TURNS[turn];
+    if (t?.sets) {
+      const next = { ...local, ...t.sets };
+      setLocal(next);
+      await pf.run(next);
+    }
+    if (turn + 1 >= TURNS.length) setPhase("results");
+    else setTurn(turn + 1);
+  }
+
+  function resetAll() {
+    pf.reset();
+    setLocal({});
+    setTurn(0);
+    setStep(0);
+    setPhase("plan");
+  }
+
+  const failed = pf.nodes.length > 0 && !pf.summary.buildPassing;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <main className="min-h-screen bg-zinc-950 text-zinc-100">
+      <header className="border-b border-zinc-900">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+          <div className="flex items-baseline gap-3">
+            <span className="font-mono text-sm tracking-widest">FLUFFY</span>
+            <span className="text-xs text-zinc-600">CarePlan Preflight</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {pf.degraded.length > 0 && (
+              <span className="rounded border border-amber-500/30 px-2 py-0.5 font-mono text-[10px] text-amber-500/80">
+                CACHED: {pf.degraded.join(" · ")}
+              </span>
+            )}
+            <button
+              onClick={resetAll}
+              className="font-mono text-[10px] tracking-wider text-zinc-600 transition hover:text-zinc-400"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              RESET
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-6xl px-6 py-10">
+        {phase === "plan" && (
+          <div className="mx-auto max-w-2xl">
+            <div className="rounded-lg border border-zinc-800 p-6">
+              <div className="flex items-baseline justify-between">
+                <h1 className="text-lg font-medium">Maya Thompson</h1>
+                <span className="font-mono text-[11px] text-zinc-600">
+                  34 · F · 1992-03-14
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-zinc-500">
+                Plaque psoriasis — methotrexate initiation
+              </p>
+
+              <div className="mt-6 space-y-3 border-t border-zinc-900 pt-5">
+                {[
+                  ["Medication", "Methotrexate 15 mg oral — once weekly"],
+                  ["Laboratory", "Baseline CBC, hepatic panel, serum creatinine"],
+                  ["Follow-up", "Return in four weeks"],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex gap-6">
+                    <span className="w-24 shrink-0 font-mono text-[10px] uppercase tracking-wider text-zinc-600">
+                      {k}
+                    </span>
+                    <span className="text-sm text-zinc-300">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button
+              onClick={startPreflight}
+              className="mt-6 w-full rounded-lg border border-zinc-700 bg-zinc-900 py-3 font-mono text-xs tracking-widest transition hover:border-zinc-600 hover:bg-zinc-800"
             >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+              RUN PREFLIGHT
+            </button>
+            <p className="mt-3 text-center text-xs text-zinc-600">
+              Clinically correct. Now check whether the patient can actually run it.
+            </p>
+          </div>
+        )}
+
+        {phase === "compiling" && (
+          <div className="mx-auto max-w-md space-y-2 pt-10">
+            {COMPILE_STEPS.map((s, i) => (
+              <div
+                key={s}
+                className={`flex items-center gap-3 font-mono text-xs transition ${
+                  i < step ? "text-zinc-300" : "text-zinc-700"
+                }`}
+              >
+                <span className={i < step ? "text-emerald-500" : ""}>
+                  {i < step ? "✓" : "·"}
+                </span>
+                {s}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {phase === "conversation" && (
+          <div className="grid gap-5 lg:grid-cols-3">
+            <div className="rounded-lg border border-zinc-800 p-5">
+              <div className="mb-4 font-mono text-[10px] tracking-wider text-zinc-600">
+                TRANSCRIPT
+              </div>
+              <div className="space-y-4">
+                {TURNS.slice(0, turn + 1).map((t, i) => (
+                  <div key={i} className="space-y-2">
+                    <p className="text-xs leading-relaxed text-zinc-400">
+                      <span className="font-mono text-[10px] text-zinc-600">AGENT </span>
+                      {t.agent}
+                    </p>
+                    {i < turn && t.patient && (
+                      <p className="text-xs leading-relaxed text-zinc-200">
+                        <span className="font-mono text-[10px] text-zinc-600">
+                          PATIENT{" "}
+                        </span>
+                        {t.patient}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-zinc-800 p-5">
+              <div className="mb-4 font-mono text-[10px] tracking-wider text-zinc-600">
+                PATIENT RESPONSE
+              </div>
+              {TURNS[turn]?.patient ? (
+                <>
+                  <p className="text-sm text-zinc-200">
+                    &ldquo;{TURNS[turn].patient}&rdquo;
+                  </p>
+                  <pre className="mt-4 overflow-x-auto rounded border border-zinc-800 bg-zinc-900/50 p-3 font-mono text-[10px] text-zinc-500">
+                    {JSON.stringify(TURNS[turn].sets, null, 2)}
+                  </pre>
+                </>
+              ) : (
+                <p className="text-xs text-zinc-600">No response required this turn.</p>
+              )}
+              <button
+                onClick={advance}
+                disabled={pf.busy}
+                className="mt-5 w-full rounded border border-zinc-700 py-2 font-mono text-[11px] tracking-wider text-zinc-300 transition hover:bg-zinc-900 disabled:opacity-40"
+              >
+                {pf.busy ? "RECOMPUTING…" : "NEXT"}
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-zinc-800 p-5">
+              <div className="mb-4 font-mono text-[10px] tracking-wider text-zinc-600">
+                RETRIEVAL
+              </div>
+              {TURNS[turn]?.retrieval ? (
+                <>
+                  <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
+                    <span className="text-zinc-500">{TURNS[turn].retrieval!.doc}</span>
+                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-emerald-500">
+                      {TURNS[turn].retrieval!.ms}ms
+                    </span>
+                  </div>
+                  <blockquote className="mt-3 border-l-2 border-zinc-700 pl-3 text-xs italic leading-relaxed text-zinc-400">
+                    {TURNS[turn].retrieval!.excerpt}
+                  </blockquote>
+                </>
+              ) : (
+                <p className="text-xs text-zinc-600">No retrieval this turn.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {phase === "results" && (
+          <div className="space-y-6">
+            <div
+              className={`rounded-lg border p-6 transition-all duration-500 ${
+                failed
+                  ? "border-red-500/40 bg-red-500/5"
+                  : "border-emerald-500/40 bg-emerald-500/5"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <span
+                  className={`font-mono text-xl ${
+                    failed ? "text-red-500" : "text-emerald-500"
+                  }`}
+                >
+                  {failed ? "✕" : "✓"}
+                </span>
+                <h2
+                  className={`font-mono text-lg tracking-wider ${
+                    failed ? "text-red-400" : "text-emerald-400"
+                  }`}
+                >
+                  {failed ? "PREFLIGHT FAILED" : "PREFLIGHT PASSED"}
+                </h2>
+              </div>
+              <p className="mt-2 font-mono text-xs text-zinc-500">
+                {pf.summary.passed} passed · {pf.summary.blocked} blocked ·{" "}
+                {pf.summary.needsVerification} needs review · {pf.summary.pending}{" "}
+                waiting
+              </p>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+              <div className="space-y-3">
+                {pf.nodes
+                  .filter(
+                    (n) =>
+                      n.status === "blocked" ||
+                      n.status === "needs_human_verification" ||
+                      n.status === "resolved"
+                  )
+                  .map((n) => (
+                    <BlockerCard
+                      key={n.id}
+                      node={n}
+                      busy={pf.busy}
+                      onResolve={() =>
+                        pf.resolve(n.id as NodeId, "schedule_appointment")
+                      }
+                    />
+                  ))}
+              </div>
+
+              <div className="space-y-5">
+                <GraphView nodes={pf.nodes} />
+
+                <div className="rounded-lg border border-zinc-800 p-5">
+                  <div className="mb-3 font-mono text-[10px] tracking-wider text-zinc-600">
+                    CHANGE THE FACTS
+                  </div>
+                  <div className="space-y-2">
+                    {(
+                      [
+                        ["Patient has a car", { hasTransport: true }],
+                        ["Weekday lab works", { weekdayLabAvailable: true }],
+                        [
+                          "Dosing understood",
+                          { believedDosingFrequency: "weekly" },
+                        ],
+                      ] as [string, Partial<PatientConstraints>][]
+                    ).map(([label, patch]) => (
+                      <button
+                        key={label}
+                        onClick={() => pf.override(patch)}
+                        disabled={pf.busy}
+                        className="w-full rounded border border-zinc-800 px-3 py-2 text-left font-mono text-[11px] text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200 disabled:opacity-40"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-[10px] leading-relaxed text-zinc-700">
+                    Recomputes against live Medplum, Stedi and Moss.
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-zinc-800 p-5">
+                  <div className="mb-3 font-mono text-[10px] tracking-wider text-zinc-600">
+                    ALL CHECKS
+                  </div>
+                  <div className="space-y-2">
+                    {pf.nodes.map((n) => (
+                      <div
+                        key={n.id}
+                        className="flex items-center justify-between gap-2"
+                      >
+                        <span className="font-mono text-[10px] text-zinc-500">
+                          {n.id}
+                        </span>
+                        <StatusPill status={n.status} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setPhase("readback")}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 py-3 font-mono text-[11px] tracking-widest transition hover:border-zinc-600 hover:bg-zinc-800"
+                >
+                  READ PLAN BACK TO PATIENT →
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {phase === "readback" && (
+          <Readback
+            nodes={pf.nodes}
+            busy={pf.busy}
+            onConfirm={() => setPhase("proof")}
+          />
+        )}
+
+        {phase === "proof" && (
+          <div className="space-y-6">
+            <MedplumProof />
+
+            <div className="rounded-lg border border-zinc-800 p-8 text-center">
+              <p className="text-sm leading-relaxed text-zinc-400">
+                Care plans are written as lists.
+                <br />
+                Patients experience them as dependency graphs.
+              </p>
+              <p className="mt-5 font-mono text-xs tracking-wide text-zinc-100">
+                We fail the build when the patient can&rsquo;t run it.
+              </p>
+              <button
+                onClick={resetAll}
+                className="mt-8 font-mono text-[10px] tracking-wider text-zinc-600 transition hover:text-zinc-400"
+              >
+                RUN AGAIN
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </main>
   );
 }

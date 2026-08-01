@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
+/* This app is committed to a single dark look — the CI-build aesthetic only
+   reads correctly on near-black. Pin it rather than following the OS theme,
+   otherwise light-mode viewers get a white band behind the page. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #09090b; /* zinc-950 */
+  --foreground: #f4f4f5; /* zinc-100 */
 }
 
 @theme inline {
@@ -12,15 +15,10 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }

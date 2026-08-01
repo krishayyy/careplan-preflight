@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local tooling
+.claude/
+.claude-flow/
+
+# the template is safe to commit (no values)
+!.env.local.example
