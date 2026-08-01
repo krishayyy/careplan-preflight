@@ -25,7 +25,7 @@ export type ResourcesResponse = {
  * shows the product isn't a frontend mockup over hardcoded state.
  */
 export async function GET(): Promise<NextResponse> {
-  if (!process.env.MEDPLUM_CLIENT_ID || !process.env.SEED_PATIENT_ID) {
+  if (!process.env.MEDPLUM_CLIENT_ID || !process.env.MEDPLUM_CLIENT_SECRET) {
     return NextResponse.json({
       rows: [],
       degraded: "Medplum not configured — showing no live resources.",
@@ -37,16 +37,19 @@ export async function GET(): Promise<NextResponse> {
     const tag = `${SEED_TAG.system}|${SEED_TAG.code}`;
     const rows: ResourceRow[] = [];
 
-    const carePlan = await medplum.readResource(
-      "CarePlan",
-      process.env.SEED_CAREPLAN_ID!
-    );
-    rows.push({
-      resourceType: "CarePlan",
-      id: carePlan.id!,
-      summary: carePlan.title ?? "Care plan",
-      status: carePlan.status,
+    const carePlans = await medplum.searchResources("CarePlan", {
+      _tag: tag,
+      _count: 1,
+      _sort: "-_lastUpdated",
     });
+    for (const carePlan of carePlans) {
+      rows.push({
+        resourceType: "CarePlan",
+        id: carePlan.id!,
+        summary: carePlan.title ?? "Care plan",
+        status: carePlan.status,
+      });
+    }
 
     const tasks = await medplum.searchResources("Task", { _tag: tag, _count: 50 });
     for (const t of tasks) {

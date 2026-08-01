@@ -24,7 +24,10 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   if (!skipWrite && !bundle.degraded) {
     try {
-      const taskIds = await createTasksFromNodes(nodes);
+      const taskIds = await createTasksFromNodes(nodes, {
+        patientId: bundle.patient.id!,
+        carePlanId: bundle.carePlan.id!,
+      });
       await createProvenance(nodes, taskIds);
       for (const n of nodes) n.medplumTaskId = taskIds[n.id];
     } catch (err) {

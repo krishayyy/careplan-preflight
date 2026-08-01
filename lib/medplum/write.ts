@@ -23,17 +23,26 @@ function taskStatus(node: PreflightNode): Task["status"] {
  * dependency Tasks, so they must already exist. Returns nodeId → Task id.
  */
 export async function createTasksFromNodes(
-  nodes: PreflightNode[]
+  nodes: PreflightNode[],
+  ids: { patientId: string; carePlanId: string }
 ): Promise<Record<string, string>> {
   const medplum = await getMedplum();
-  const patientId = process.env.SEED_PATIENT_ID!;
-  const carePlanId = process.env.SEED_CAREPLAN_ID!;
+  const { patientId, carePlanId } = ids;
 
-  // Clear previous run so repeated demos don't accumulate Tasks.
-  const stale = await medplum.searchResources("Task", {
-    _tag: `${SEED_TAG.system}|${SEED_TAG.code}`,
+  // Clear the previous run so repeated demos don't accumulate. Provenance must
+  // go too — it targets Tasks by reference, so leaving it behind orphans it and
+  // the count climbs every time you re-run the demo.
+  const tag = `${SEED_TAG.system}|${SEED_TAG.code}`;
+
+  const staleProvenance = await medplum.searchResources("Provenance", {
+    _tag: tag,
     _count: 100,
   });
+  for (const p of staleProvenance) {
+    if (p.id) await medplum.deleteResource("Provenance", p.id);
+  }
+
+  const stale = await medplum.searchResources("Task", { _tag: tag, _count: 100 });
   for (const t of stale) {
     if (t.id) await medplum.deleteResource("Task", t.id);
   }
@@ -79,9 +88,24 @@ export async function createProvenance(
   taskIds: Record<string, string>
 ): Promise<void> {
   const medplum = await getMedplum();
+
+  // Discover the rule DocumentReferences by their identifier rather than
+  // relying on a SEED_DOC_IDS blob being pasted into the environment.
   const docIds: Record<string, string> = JSON.parse(
     process.env.SEED_DOC_IDS ?? "{}"
   );
+  if (Object.keys(docIds).length === 0) {
+    const docs = await medplum.searchResources("DocumentReference", {
+      _tag: `${SEED_TAG.system}|${SEED_TAG.code}`,
+      _count: 20,
+    });
+    for (const d of docs) {
+      const rid = d.identifier?.find(
+        (i) => i.system === "https://careplan-preflight.dev/rule"
+      )?.value;
+      if (rid && d.id) docIds[rid] = d.id;
+    }
+  }
 
   const attributable = nodes.filter(
     (n) => n.status === "blocked" || n.status === "needs_human_verification"
@@ -121,10 +145,23 @@ export async function createProvenance(
 }
 
 /** Books the seeded Saturday slot. Falls back to a plain Appointment. */
-export async function bookSaturdaySlot(): Promise<Appointment> {
+export async function bookSaturdaySlot(ids: {
+  patientId: string;
+  slotId?: string;
+}): Promise<Appointment> {
   const medplum = await getMedplum();
-  const slotId = process.env.SEED_SATURDAY_SLOT_ID!;
-  const patientId = process.env.SEED_PATIENT_ID!;
+  const { patientId } = ids;
+
+  let slotId = ids.slotId ?? process.env.SEED_SATURDAY_SLOT_ID;
+  if (!slotId) {
+    const free = await medplum.searchResources("Slot", {
+      _tag: `${SEED_TAG.system}|${SEED_TAG.code}`,
+      status: "free",
+      _count: 1,
+    });
+    slotId = free[0]?.id;
+  }
+  if (!slotId) throw new Error("no free Slot to book — run scripts/seed.ts");
 
   const slot = await medplum.readResource("Slot", slotId);
 
