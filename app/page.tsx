@@ -4,6 +4,7 @@ import { useState } from "react";
 import { usePreflight } from "@/lib/usePreflight";
 import { BlockerCard, GraphView, StatusPill } from "@/components/ui";
 import { MedplumProof, Readback } from "@/components/proof";
+import { Conversation } from "@/components/conversation";
 import type { NodeId, PatientConstraints } from "@/lib/types";
 
 type Phase =
@@ -13,46 +14,6 @@ type Phase =
   | "results"
   | "readback"
   | "proof";
-
-/**
- * Scripted conversation turns. Swap for live Deepgram STT later — the
- * constraint payloads each turn produces are exactly what extraction emits.
- */
-const TURNS: {
-  agent: string;
-  patient?: string;
-  sets?: Partial<PatientConstraints>;
-  retrieval?: { doc: string; excerpt: string; ms: number };
-}[] = [
-  {
-    agent:
-      "Before your treatment begins I need to confirm a few practical details. How often do you think you'll take this medication?",
-    patient: "Every day, with breakfast.",
-    sets: { believedDosingFrequency: "daily" },
-    retrieval: {
-      doc: "Methotrexate Initiation Protocol",
-      excerpt:
-        "Methotrexate for plaque psoriasis is dosed ONCE WEEKLY. Daily administration is a known fatal medication error.",
-      ms: 6,
-    },
-  },
-  {
-    agent:
-      "The plan your clinician recorded says once weekly, not daily. I'll flag this for the clinical team to confirm with you before treatment begins.",
-  },
-  {
-    agent:
-      "Would you be able to complete laboratory testing on a weekday between eight and five?",
-    patient: "No — I work eight to six.",
-    sets: { weekdayLabAvailable: false },
-    retrieval: {
-      doc: "Northside Laboratory Hours",
-      excerpt:
-        "Saturday appointments available 8:00 AM to 12:00 PM for patients unable to attend weekday hours.",
-      ms: 7,
-    },
-  },
-];
 
 const COMPILE_STEPS = [
   "Reading Medplum CarePlan",
@@ -65,7 +26,6 @@ const COMPILE_STEPS = [
 
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("plan");
-  const [turn, setTurn] = useState(0);
   const [step, setStep] = useState(0);
   const [local, setLocal] = useState<PatientConstraints>({});
   const pf = usePreflight();
@@ -78,25 +38,12 @@ export default function Home() {
       await new Promise((r) => setTimeout(r, 240));
     }
     await pf.run({});
-    setTurn(0);
     setPhase("conversation");
-  }
-
-  async function advance() {
-    const t = TURNS[turn];
-    if (t?.sets) {
-      const next = { ...local, ...t.sets };
-      setLocal(next);
-      await pf.run(next);
-    }
-    if (turn + 1 >= TURNS.length) setPhase("results");
-    else setTurn(turn + 1);
   }
 
   function resetAll() {
     pf.reset();
     setLocal({});
-    setTurn(0);
     setStep(0);
     setPhase("plan");
   }
@@ -188,78 +135,17 @@ export default function Home() {
         )}
 
         {phase === "conversation" && (
-          <div className="grid gap-5 lg:grid-cols-3">
-            <div className="rounded-lg border border-zinc-800 p-5">
-              <div className="mb-4 font-mono text-[10px] tracking-wider text-zinc-600">
-                TRANSCRIPT
-              </div>
-              <div className="space-y-4">
-                {TURNS.slice(0, turn + 1).map((t, i) => (
-                  <div key={i} className="space-y-2">
-                    <p className="text-xs leading-relaxed text-zinc-400">
-                      <span className="font-mono text-[10px] text-zinc-600">AGENT </span>
-                      {t.agent}
-                    </p>
-                    {i < turn && t.patient && (
-                      <p className="text-xs leading-relaxed text-zinc-200">
-                        <span className="font-mono text-[10px] text-zinc-600">
-                          PATIENT{" "}
-                        </span>
-                        {t.patient}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-zinc-800 p-5">
-              <div className="mb-4 font-mono text-[10px] tracking-wider text-zinc-600">
-                PATIENT RESPONSE
-              </div>
-              {TURNS[turn]?.patient ? (
-                <>
-                  <p className="text-sm text-zinc-200">
-                    &ldquo;{TURNS[turn].patient}&rdquo;
-                  </p>
-                  <pre className="mt-4 overflow-x-auto rounded border border-zinc-800 bg-zinc-900/50 p-3 font-mono text-[10px] text-zinc-500">
-                    {JSON.stringify(TURNS[turn].sets, null, 2)}
-                  </pre>
-                </>
-              ) : (
-                <p className="text-xs text-zinc-600">No response required this turn.</p>
-              )}
-              <button
-                onClick={advance}
-                disabled={pf.busy}
-                className="mt-5 w-full rounded border border-zinc-700 py-2 font-mono text-[11px] tracking-wider text-zinc-300 transition hover:bg-zinc-900 disabled:opacity-40"
-              >
-                {pf.busy ? "RECOMPUTING…" : "NEXT"}
-              </button>
-            </div>
-
-            <div className="rounded-lg border border-zinc-800 p-5">
-              <div className="mb-4 font-mono text-[10px] tracking-wider text-zinc-600">
-                RETRIEVAL
-              </div>
-              {TURNS[turn]?.retrieval ? (
-                <>
-                  <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
-                    <span className="text-zinc-500">{TURNS[turn].retrieval!.doc}</span>
-                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-emerald-500">
-                      {TURNS[turn].retrieval!.ms}ms
-                    </span>
-                  </div>
-                  <blockquote className="mt-3 border-l-2 border-zinc-700 pl-3 text-xs italic leading-relaxed text-zinc-400">
-                    {TURNS[turn].retrieval!.excerpt}
-                  </blockquote>
-                </>
-              ) : (
-                <p className="text-xs text-zinc-600">No retrieval this turn.</p>
-              )}
-            </div>
-          </div>
+          <Conversation
+            busy={pf.busy}
+            onConstraints={async (patch) => {
+              const next = { ...local, ...patch };
+              setLocal(next);
+              await pf.run(next);
+            }}
+            onDone={() => setPhase("results")}
+          />
         )}
+
 
         {phase === "results" && (
           <div className="space-y-6">
