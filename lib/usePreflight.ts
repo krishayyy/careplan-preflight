@@ -48,15 +48,19 @@ export function usePreflight() {
     [apply]
   );
 
-  /** Resolve a blocker — books the Saturday slot in Medplum. */
+  /**
+   * Resolve a blocker. `schedule_appointment` books the Saturday slot in
+   * Medplum; `human_review` / `patient_confirmation` record that a person did
+   * the work — the only route to `resolved` for clinical and payer nodes.
+   */
   const resolve = useCallback(
-    async (nodeId: NodeId, action: string) => {
+    async (nodeId: NodeId, action: string, verifiedBy?: string) => {
       setBusy(true);
       try {
         const res = await fetch("/api/resolve", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ constraints, nodeId, action }),
+          body: JSON.stringify({ constraints, nodeId, action, verifiedBy }),
         });
         apply((await res.json()) as PreflightResponse);
       } finally {

@@ -122,6 +122,17 @@ export type PatientConstraints = {
   acceptsSaturdaySlot?: boolean;
   readbackConfirmed?: boolean;
   hasTransport?: boolean;
+
+  /**
+   * Human verification events. These are the ONLY way the corresponding
+   * clinical/payer nodes reach `resolved` — a person did the work and recorded
+   * it. Nothing infers these; no LLM sets them.
+   */
+  payerVerifiedBy?: string;
+  safetyAckDocumentedBy?: string;
+  dosingConfirmedBy?: string;
+  labResultsReviewedBy?: string;
+  labsCompleted?: boolean;
 };
 
 export type PreflightSummary = {

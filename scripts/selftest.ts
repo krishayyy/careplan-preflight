@@ -110,8 +110,29 @@ async function main() {
   check("medication-start still gated", byId2["medication-start"].status, "pending");
   check("build still fails", s2.buildPassing, false);
 
+  // ── human verification clears the build ───────────────────────────────────
+  console.log("\n═══ 5. Human verification → build passes ═══\n");
+  const allDone = await buildNodes(FAKE_BUNDLE, {
+    ...afterVoice,
+    acceptsSaturdaySlot: true,
+    payerVerifiedBy: "auth staff",
+    safetyAckDocumentedBy: "Dr. Reyes",
+    dosingConfirmedBy: "Dr. Reyes",
+  });
+  table(allDone.nodes);
+  const s3 = summarize(allDone.nodes);
+  console.log(`\n    ${JSON.stringify(s3)}`);
+  check("no blockers remain", s3.blocked, 0);
+  check("nothing awaiting verification", s3.needsVerification, 0);
+  check("build passes", s3.buildPassing, true);
+
+  // SAFETY: clearing the blockers still doesn't claim the work is finished.
+  const byId3 = Object.fromEntries(allDone.nodes.map((n) => [n.id, n]));
+  check("baseline-labs still not done", byId3["baseline-labs"].status, "pending");
+  check("medication-start not asserted", byId3["medication-start"].status, "pending");
+
   // ── every blocker must cite a source ──────────────────────────────────────
-  console.log("\n═══ 5. Citation coverage ═══\n");
+  console.log("\n═══ 6. Citation coverage ═══\n");
   const blockers = voiced.nodes.filter(
     (n) => n.status === "blocked" || n.status === "needs_human_verification"
   );

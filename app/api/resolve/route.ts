@@ -16,6 +16,8 @@ type Body = {
   /** Set when resolving a specific node (e.g. booking the Saturday slot). */
   nodeId?: string;
   action?: string;
+  /** Who performed a human verification. Recorded, never inferred. */
+  verifiedBy?: string;
 };
 
 /**
@@ -47,6 +49,17 @@ export async function POST(req: Request): Promise<NextResponse> {
       }
     }
     constraints.acceptsSaturdaySlot = true;
+  }
+
+  // Human verification events. These are the only route to `resolved` for the
+  // clinical/payer nodes — a person did the work and is recorded as having
+  // done it. Nothing here is inferred.
+  if (body.action === "human_review" || body.action === "patient_confirmation") {
+    const by = body.verifiedBy?.trim() || "clinic staff";
+    if (body.nodeId === "payer-verification") constraints.payerVerifiedBy = by;
+    if (body.nodeId === "safety-ack") constraints.safetyAckDocumentedBy = by;
+    if (body.nodeId === "dosing-comprehension") constraints.dosingConfirmedBy = by;
+    if (body.nodeId === "clinician-review") constraints.labResultsReviewedBy = by;
   }
 
   const { nodes, degraded } = await buildNodes(bundle, constraints);

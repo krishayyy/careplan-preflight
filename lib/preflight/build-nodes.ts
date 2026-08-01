@@ -51,7 +51,23 @@ export async function buildNodes(
 
   const labResolved = constraints.acceptsSaturdaySlot === true;
   const labBlocked = constraints.weekdayLabAvailable === false && !labResolved;
-  const dosingWrong = constraints.believedDosingFrequency === "daily";
+  const dosingWrong =
+    constraints.believedDosingFrequency === "daily" &&
+    !constraints.dosingConfirmedBy;
+
+  const now = () => new Date().toISOString();
+
+  /** A human did the work and recorded it — the only route to `resolved`. */
+  const verified = (by: string | undefined, sourceRef: string) =>
+    by
+      ? {
+          status: "resolved" as const,
+          resolvedAt: now(),
+          sourceType: "deterministic_rule" as const,
+          sourceReference: sourceRef,
+          sourceExcerpt: `Recorded by ${by}.`,
+        }
+      : null;
 
   const nodes: PreflightNode[] = [
     {
@@ -68,6 +84,10 @@ export async function buildNodes(
       resolutionType: "human_review",
       resolutionAction:
         "Authorization staff to verify requirement with the payer",
+      ...(verified(
+        constraints.payerVerifiedBy,
+        "Authorization staff verification"
+      ) ?? {}),
     },
     {
       id: "lab-access",
@@ -109,6 +129,10 @@ export async function buildNodes(
       resolutionType: "patient_confirmation",
       resolutionAction:
         "Clinical team to re-confirm weekly dosing before first dose",
+      ...(verified(
+        constraints.dosingConfirmedBy,
+        "Clinician re-confirmed dosing with patient"
+      ) ?? {}),
     },
     {
       id: "safety-ack",
@@ -121,6 +145,10 @@ export async function buildNodes(
       ...edges("safety-ack"),
       resolutionType: "human_review",
       resolutionAction: "Clinician to complete and document counseling",
+      ...(verified(
+        constraints.safetyAckDocumentedBy,
+        "Teratogenicity counseling documented"
+      ) ?? {}),
     },
     {
       id: "baseline-labs",

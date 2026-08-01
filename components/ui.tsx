@@ -73,10 +73,16 @@ export function BlockerCard({
   busy?: boolean;
 }) {
   const s = STATUS_STYLE[node.status];
-  const canResolve =
-    onResolve &&
-    node.status === "blocked" &&
-    node.resolutionType === "schedule_appointment";
+  const open =
+    node.status === "blocked" || node.status === "needs_human_verification";
+  const canResolve = Boolean(onResolve) && open;
+
+  const ACTION_LABEL: Record<string, string> = {
+    schedule_appointment: "BOOK SATURDAY SLOT",
+    human_review: "MARK VERIFIED",
+    patient_confirmation: "CONFIRMED WITH PATIENT",
+  };
+  const actionLabel = ACTION_LABEL[node.resolutionType];
 
   return (
     <div
@@ -120,14 +126,20 @@ export function BlockerCard({
         <p className="mt-2 text-xs text-zinc-500">→ {node.resolutionAction}</p>
       )}
 
-      {canResolve && (
+      {canResolve && actionLabel && (
         <button
           onClick={onResolve}
           disabled={busy}
           className="mt-3 rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 font-mono text-[11px] tracking-wide text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-40"
         >
-          {busy ? "BOOKING…" : "BOOK SATURDAY SLOT"}
+          {busy ? "WORKING…" : actionLabel}
         </button>
+      )}
+
+      {node.status === "resolved" && node.resolvedAt && (
+        <p className="mt-3 font-mono text-[10px] text-emerald-500/70">
+          ✓ resolved {new Date(node.resolvedAt).toLocaleTimeString()}
+        </p>
       )}
     </div>
   );

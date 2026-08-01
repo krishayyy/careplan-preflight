@@ -308,7 +308,7 @@ export default function Home() {
                       node={n}
                       busy={pf.busy}
                       onResolve={() =>
-                        pf.resolve(n.id as NodeId, "schedule_appointment")
+                        pf.resolve(n.id as NodeId, n.resolutionType)
                       }
                     />
                   ))}
